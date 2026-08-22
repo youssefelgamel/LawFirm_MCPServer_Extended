@@ -173,3 +173,19 @@ CREATE INDEX idx_hitl_tasks_thread
 
 CREATE INDEX idx_hitl_tasks_status
     ON hitl_tasks(status);
+
+
+CREATE TABLE tickets (
+    ticket_id      TEXT PRIMARY KEY,
+    case_id        TEXT NOT NULL REFERENCES "case"(case_id),
+    thread_id      TEXT NOT NULL,
+    checkpoint_id  TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+    error_message  TEXT NOT NULL,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_by    TEXT REFERENCES staff(staff_id),
+    resolved_at    TEXT
+);
+
+CREATE INDEX idx_tickets_thread ON tickets(thread_id);
+CREATE INDEX idx_tickets_status ON tickets(status);

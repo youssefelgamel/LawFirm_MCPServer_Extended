@@ -4,8 +4,18 @@ import sys
 from langgraph.types import Command
 from state_graph.checkpointer import DBCheckpointSaver
 from state_graph.conflict_clearance import graph as conflict_graph
+import requests
 
 THREAD_ID = "conflict-test-thread"
+
+class FakeConflictResponse:
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {
+            "results": ["No conflicting party found."]
+        }
 
 
 def record_node(node_name: str, log_file: str) -> None:
@@ -29,10 +39,10 @@ def install_test_hooks(log_file: str, mode: str) -> None:
     def conflict_hook(state):
         record_node("decompose_conflict_check", log_file)
         return original_conflict(state)
-
-    def search_hook(state):
+    
+    def search_hook(state, config):
         record_node("search", log_file)
-        return original_search(state)
+        return original_search(state, config)
 
     def evaluate_hook(state):
         record_node("evaluate", log_file)
@@ -64,6 +74,11 @@ def install_test_hooks(log_file: str, mode: str) -> None:
     conflict_graph.partner_signoff_node = signoff_hook
 
 
+def fake_conflict_search(*args, **kwargs):
+    return FakeConflictResponse()
+
+
+
 def main() -> None:
     if len(sys.argv) != 4:
         raise SystemExit(
@@ -73,6 +88,9 @@ def main() -> None:
     db_path = sys.argv[1]
     log_file = sys.argv[2]
     mode = sys.argv[3]
+
+    if mode in {"normal", "crash"}:
+        requests.post = fake_conflict_search
 
     valid_modes = {"crash", "recover", "normal", "start", "resume"}
     if mode not in valid_modes:

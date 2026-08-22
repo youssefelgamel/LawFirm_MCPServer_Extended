@@ -2,11 +2,21 @@
 # pytest tests/test_checkpointer.py tests/test_conflict_clearance.py -v
 
 from __future__ import annotations
+
 import os
 import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
+import requests
+
+from state_graph.checkpointer import DBCheckpointSaver
+from state_graph.conflict_clearance import graph as conflict_graph
+from state_graph.conflict_clearance.resume_ticket import resume_from_ticket
+
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -187,3 +197,65 @@ def test_conflict_check_generates_ordered_checklist(tmp_path):
         "awaiting_partner_signoff",
     ]
 
+# Add these imports near the top of test_conflict_clearance.py:
+#
+# import requests
+# from unittest.mock import Mock
+# from state_graph.conflict_clearance.graph import ConflictSearchError
+# from state_graph.resume_ticket import resume_from_ticket
+
+THREAD_ID_TICKET = "ticket-test-thread"
+
+
+def test_conflict_search_failure_opens_ticket_and_resumes(tmp_path, monkeypatch):
+    db_path = tmp_path / "case_intake_test.db"
+    create_test_database(db_path)
+
+    monkeypatch.setattr(
+        requests, "post",
+        Mock(side_effect=requests.exceptions.Timeout("conflict service timed out")),
+    )
+
+    checkpointer = DBCheckpointSaver(str(db_path))
+    graph = conflict_graph.build_graph(checkpointer)
+    config = {"configurable": {"thread_id": THREAD_ID_TICKET, "db_path": str(db_path)}}
+
+    with pytest.raises(conflict_graph.ConflictSearchError):
+        graph.invoke(
+            {"case_id": "case-test", "status": "intake",
+             "conflict_found": False, "partner_approved": False},
+            config,
+            durability="sync",
+        )
+
+    # 2) A ticket exists, is open, and carries a checkpoint_id.
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT ticket_id, status, checkpoint_id FROM tickets WHERE thread_id = ?",
+        (THREAD_ID_TICKET,),
+    ).fetchone()
+    conn.close()
+
+    assert row is not None
+    ticket_id, status, checkpoint_id = row
+    assert status == "open"
+    assert checkpoint_id is not None
+
+    # 3) Make the service succeed now, and resolve the ticket.
+    ok_response = Mock()
+    ok_response.raise_for_status = Mock()
+    ok_response.json = Mock(return_value={"results": ["No conflicting party found."]})
+    monkeypatch.setattr(requests, "post", Mock(return_value=ok_response))
+
+    result = resume_from_ticket(str(db_path), ticket_id, resolved_by="staff-test")
+
+    # 4) It reached a final decision (search re-ran, not intake) and the
+    #    ticket is now resolved.
+    assert result["status"] in {"cleared", "rejected"}
+
+    conn = sqlite3.connect(db_path)
+    resolved_status = conn.execute(
+        "SELECT status FROM tickets WHERE ticket_id = ?", (ticket_id,)
+    ).fetchone()[0]
+    conn.close()
+    assert resolved_status == "resolved"

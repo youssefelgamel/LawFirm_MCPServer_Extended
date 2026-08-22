@@ -8,6 +8,8 @@ from project_root.rag.policy_retriever import retrieve_policy_docs
 import sqlite3
 import uuid
 from mcp_server.database import get_connection
+import requests
+from state_graph.conflict_clearance.tickets import open_ticket
 
 RISK_SCORE_THRESHOLD = 0.70
 
@@ -35,14 +37,59 @@ def decompose_conflict_check_node(state: ConflictState) -> dict:
     return {"check_list": check_list, "status": "running_conflict_check"}
 
 
-def search_node(state: ConflictState) -> dict:
-    return {"search_results": ["No conflicting party found."]}
+class ConflictSearchError(Exception):
+    """Raised when the conflict-search service times out or returns a
+    malformed response. Deliberately left uncaught here so the graph run
+    halts at this node instead of hanging or silently treating a service
+    failure as a policy decision."""
+
+
+def search_node(state: ConflictState, config) -> dict:
+    configurable = config["configurable"]
+    thread_id = configurable["thread_id"]
+    db_path = configurable["db_path"]
+
+    # Look up the last checkpoint actually saved for this thread
+    # (i.e. the state after decompose_conflict_check completed).
+    checkpointer = DBCheckpointSaver(db_path)
+    latest = checkpointer.get_tuple({"configurable": {"thread_id": thread_id}})
+    checkpoint_id = latest.checkpoint["id"] if latest else None
+
+    try:
+        response = requests.post(
+            "https://conflict-search.internal/api/search",
+            json={"case_id": state["case_id"]},
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if "results" not in data:
+            raise ValueError("malformed response: missing 'results' field")
+    except (requests.exceptions.Timeout, requests.exceptions.RequestException, ValueError) as e:
+        ticket_id = open_ticket(
+            db_path=db_path,
+            case_id=state["case_id"],
+            thread_id=thread_id,
+            checkpoint_id=checkpoint_id,
+            error_message=str(e),
+        )
+        raise ConflictSearchError(f"conflict search failed, ticket {ticket_id} opened") from e
+
+    return {"search_results": data["results"]}
 
 
 def evaluate_node(state: ConflictState) -> dict:
-    risk_score = 0.85
+    search_results = state.get("search_results", [])
+
+    conflict_found = any(
+        "no conflicting party found" not in result.lower()
+        for result in search_results
+    )
+
+    risk_score = 0.85 if conflict_found else 0.0
+
     return {
-        "conflict_found": risk_score > 0,
+        "conflict_found": conflict_found,
         "risk_score": risk_score,
         "evaluation": f"Conflict risk score: {risk_score:.2f}",
     }
@@ -174,7 +221,7 @@ def build_graph(checkpointer: DBCheckpointSaver):
     builder.add_edge("intake", "decompose_conflict_check")
     builder.add_edge("decompose_conflict_check", "search")
     builder.add_edge("search", "evaluate")
-    builder.add_edge("evaluate", "retrieve_policy")
+    builder.add_conditional_edges("evaluate", route_after_conflict, {"rejected": "rejected","partner_signoff": "retrieve_policy",},)
     builder.add_edge("retrieve_policy", "draft_memo")
     builder.add_edge("draft_memo", "partner_signoff")
 
