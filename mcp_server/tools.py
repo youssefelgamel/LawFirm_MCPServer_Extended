@@ -8,9 +8,7 @@ import sqlite3
 
 from planning.decomposition.static_decomposition import decompose_goal, execute_plan, final_output
 from planning.decomposition.dynamic_decomposition import dynamic_decomposition
-from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("law_firm_server")
 logger = logging.getLogger(__name__)
 
 # ---------------------------
