@@ -1,306 +1,201 @@
 # Ashfords & Kane Law Firm — Intelligent Case Intake & Assignment System
 
-> A secure, intelligent intake workflow for legal case intake and assignment, built around a Model Context Protocol (MCP) server that lets an AI agent assist intake staff through a narrow set of guarded tools — while keeping sensitive firm data inside a controlled permission boundary.
+[![Tests](https://img.shields.io/badge/tests-pytest-blue)](https://github.com/)
+[![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
----
+A secure, audited intake workflow for legal case intake and assignment, built around a Model Context Protocol (MCP) server. The server exposes a small set of guarded tools so an AI assistant can help intake staff without gaining direct, unrestricted access to sensitive firm data.
 
 ## Table of Contents
 
-- [TL;DR](#tldr--what-this-repo-provides)
-- [Problem & Approach](#problem--approach)
-- [Features](#features)
-- [Design Highlights & Rationale](#design-highlights--rationale)
-- [Quick Start](#quick-start-developer)
-- [Usage Notes & Common Commands](#usage-notes--common-commands)
-- [Tools & Resources](#tools--resources-reference)
+- [Overview](#overview)
+- [Quick Start](#quick-start)
 - [Architecture](#architecture)
-- [Extending & Developing](#extending--developing)
-- [Testing & Benchmarks](#testing--benchmarks)
-- [Troubleshooting](#troubleshooting)
-- [Important Files](#important-files-quick-links)
+- [MCP Tools](#mcp-tools)
+- [Conflict Clearance Workflow](#conflict-clearance-workflow)
+- [Configuration & Environment](#configuration--environment)
+- [Tests & Benchmarks](#tests--benchmarks)
+- [Troubleshooting & Common Pitfalls](#troubleshooting--common-pitfalls)
+- [Important Files](#important-files)
 - [Contributing](#contributing)
-- [Closing Summary](#closing-summary)
+- [License & Contact](#license--contact)
 
----
+## Overview
 
-## TL;DR — What This Repo Provides
+This repository contains:
 
-- A modular **MCP server** with:
-  - Read-only and guarded write tools for intake, conflict checks, and assignments.
-  - An explicit short-term / long-term **memory pipeline** (routing, episodic → semantic consolidation).
-  - A pluggable **retrieval layer** (Naive, Hybrid, Agentic, Graph RAG).
-  - A **context-evaluation harness** for strategy benchmarking.
-- A small demo **Next.js front-end** for simple UI experiments.
-- **DB scripts**, sample seed data, and a broad suite of unit/integration tests.
+- A Python-based MCP server (core logic, tools, memory & retrieval subsystems).
+- A LangGraph-driven **Conflict Clearance** workflow with human-in-the-loop partner sign-off, crash-safe checkpointing, and a ticketing path for external service failures.
+- A context-evaluation harness to compare and benchmark context strategies and RAG configurations.
+- A small Next.js demo UI (`lawfirm-ui`) for interactive experiments.
+- DB schema and seed scripts to reproduce demo datasets.
 
-**Key folders** (open these for details):
-
-| Folder | Purpose |
-|---|---|
-| `mcp_server` | MCP server, tools, and memory subsystem |
-| `project_root/rag` | Retrieval strategies (Naive / Hybrid / Agentic / Graph) |
-| `planning` | Planning artifacts and design notes |
-| `context_eval` | Context-strategy benchmarking harness |
-| `state_graph` | State/graph management |
-| `db` | Schema, seed data, and DB init scripts |
-| `lawfirm-ui` | Demo Next.js front-end |
-| `tests` | Unit & integration tests |
-
----
-
-## Problem & Approach
-
-**Problem**
-
-Traditional intake is manual, slow, and error-prone — and requires careful privacy controls, since direct LLM access to firm databases is unacceptable.
-
-**Approach**
-
-Use an MCP server as a controlled middle layer. The model calls small, audited tools (read-only and guarded writes), combined with:
-
-- An explicit memory architecture (short-term buffer → routing → consolidation).
-- Context-management strategies, with **ZonePruning** chosen as the production standard.
-- Multi-strategy RAG for recovering evicted facts.
-
----
-
-## Features
-
-### 1. Secure Intake Assistance
-The agent inspects intake via read-only tools, summarizes with structured prompts, and helps human reviewers reach decisions.
-
-### 2. Conflict Awareness & Entity Graphs
-Conflict checks and a small in-memory entity graph help detect relationships and conflict-of-interest chains.
-
-### 3. Guarded Decision Tools
-Write tools require required fields and elicitation, and abort automatically when required capabilities are missing.
-
-### 4. Explicit Memory Architecture
-- **Short-term:** `RollingBuffer` and `Scratchpad` — `mcp_server/memory/short_term.py`
-- **Routing:** `MemoryRouter` decides forget vs. promote decisions and logs them — `mcp_server/memory/router.py`
-- **Consolidation:** `MemoryConsolidator` promotes episodic facts into semantic memory, tracks contradictions, and preserves history — `mcp_server/memory/consolidation.py` (scheduled by `mcp_server/memory/scheduler.py`)
-
-### 5. Multi-Strategy Retrieval (RAG)
-`NaiveRAG`, `HybridRAG` (dense + BM25 + RRF), `AgenticRAG` (multi-hop), and `GraphRAG` implementations — see `project_root/rag` and the HNSW-backed `VectorStore`.
-
-### 6. Context-Evaluation Suite
-Benchmarks multiple context strategies (`FullContext`, `SlidingWindow`, `Masking`, `RecursiveSummary`, `ZonePruning`) against 10 real intake transcripts (`context_eval`), producing the comparisons used to choose ZonePruning.
-
-### 7. Human-in-the-Loop Safety
-Sensitive state-changing tools require human oversight and elicitation for missing fields; all routing/consolidation decisions are auditable.
-
----
-
-## Design Highlights & Rationale
-
-- **ZonePruning** was selected because it preserves system instructions and early rules while capping large intermediate tool outputs — the best balance of accuracy and token economy on the benchmark suite.
-- The **Router** is conservative: it never writes directly to semantic memory, only decides forget vs. episodic, and logs every decision for audit.
-- The **Consolidator** runs periodically, not per-turn: it groups events, detects contradictions, keeps versions, and marks expirations instead of deleting facts.
-
----
-
-## Quick Start (Developer)
+## Quick Start
 
 ### Prerequisites
+
 - Python 3.10+
 - pip
-- Node.js (only if running the UI)
+- Node.js (optional — only for the demo UI)
 
-### 1. Create & activate a virtual environment
+### Setup
 
-**Windows (PowerShell)**
+**Windows (PowerShell):**
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-**macOS / Linux**
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-### 2. Install Python dependencies
-```bash
 pip install -r requirements.txt
 ```
 
-### 3. Initialize the database (optional)
-Inspect `db/schema.sql` and `db/seed_data.sql`, then run:
+**macOS / Linux:**
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Initialize the demo database (optional)
+
 ```bash
 python db/init_db.py
 ```
 
-### 4. Run the MCP server
+### Run the MCP server
+
 ```bash
 python -m mcp_server.server
 ```
-> This module exposes the LawFirm MCP server's exports and integrations used by tests and simple launchers. See `mcp_server/server.py` for exported helpers.
 
-### 5. Run the context evaluation benchmark
+### Run the context evaluation (produces CSV results)
+
 ```bash
 python -m context_eval.run_eval
 ```
-Results are saved to `context_eval/results/comparison.csv`.
 
-### 6. Run the UI (optional)
+### Run the demo UI (optional)
+
 ```bash
 cd lawfirm-ui
 npm install
 npm run dev
+# open http://localhost:3000
 ```
-Open the dev server URL printed by Next.js (usually `http://localhost:3000`).
 
-### 7. Run tests
+### Run tests
+
 ```bash
 pytest
 ```
-Individual test suites exist for memory routing, consolidation, retrieval, and assignment flows:
-- `mcp_server/memory/tests`
-- `tests`
-
----
-
-## Usage Notes & Common Commands
-
-- **Run a one-off consolidation pass** (useful for development):
-  ```bash
-  python -m mcp_server.memory.scheduler
-  ```
-- **Inspect router logs and memory stores:**
-  - `mcp_server/memory/episodic_store.json`
-  - `mcp_server/memory/semantic_store.json`
-  - `mcp_server/memory/logs/router_log.json`
-
----
-
-## Tools & Resources (Reference)
-
-**Read-only tools**
-- `database_health`
-- `get_client`
-- `get_case`
-- `get_conflict_checks`
-- `get_lawyer`
-
-**Write tools (guarded)**
-- `accept_case`
-- `reject_case`
-- `assign_case_to_lawyer`
-
-**Resources & prompts**
-- `company://intake-policy`
-- `company://case-types`
-- `company://required-documents`
-- `company://lawyers`
-- `summarize_case` (structured summary prompt)
-
-See `mcp_server/tools.py` for concrete implementations and usage contracts.
-
----
 
 ## Architecture
 
-**Conversation flow**
+The system is built from a few distinct layers:
+
+- **MCP tool layer** — a small, audited interface of read-only and guarded write tools (see [MCP Tools](#mcp-tools)). Tools that need information not yet provided use MCP's elicitation mechanism to ask for it interactively, rather than failing outright.
+- **Conflict Clearance graph** — a LangGraph state machine that runs every new case through search, risk evaluation, policy retrieval, and partner sign-off before it's cleared or rejected. See [Conflict Clearance Workflow](#conflict-clearance-workflow) for details.
+- **Memory pipeline** — short-term buffers routed through decision logging into consolidated semantic and history stores.
+- **Retrieval layer** — multiple interchangeable strategies (Naive, Hybrid, Agentic, Graph) for pulling relevant context.
+
+**Conversation flow (conceptual):**
 ```
-Conversation turn → RollingBuffer (short-term)
-                        │  (on overflow, router decisions logged)
-                        ▼
-                 MemoryRouter → forget | episodic_store.json
-                                              │  (scheduled consolidation)
-                                              ▼
-                                     MemoryConsolidator
-                                         │              │
-                                         ▼              ▼
-                              semantic_store.json   history_store.json
+User / agent turn → RollingBuffer (short-term)
+                       │
+                       ▼
+               MemoryRouter → (forget | episodic_store.json)
+                       │ (decisions logged)
+                       ▼
+                MemoryConsolidator → semantic_store.json + history_store.json
 ```
 
-**Retrieval flow**
+**Retrieval flow (conceptual):**
 ```
 Agent query → Retrieval strategy (Naive | Hybrid | Agentic | Graph)
-            → VectorStore / BM25 / Graph
-            → returned chunks
-            → summarization or decision step
+            → VectorStore / BM25 / Graph → returned chunks → summarizer/decision
 ```
 
----
+## MCP Tools
 
-## Extending & Developing
+All tools live in `mcp_server/tools.py` and are registered against the single shared `mcp` instance in `mcp_server/mcp_instance.py`.
 
-**Add a new retrieval strategy**
-Implement it under `project_root/rag`, add unit tests, and add performance comparisons to `context_eval`.
-
-**Change context strategy**
-Edit or add a strategy in `context_eval/strategies`, then re-run:
-```bash
-python -m context_eval.run_eval
-```
-
-**Modify memory routing logic**
-Update `mcp_server/memory/router.py` and add deterministic tests under `mcp_server/memory/tests`.
-
-**Guidelines**
-- Keep routing decisions auditable — always write to the router log.
-- Consolidation must be idempotent and preserve history.
-- Guard all write tools with elicitation and capability checks so no silent writes happen.
-
----
-
-## Testing & Benchmarks
-
-Run the entire test suite:
-```bash
-pytest
-```
-
-Run specific memory tests:
-```bash
-pytest mcp_server/memory/tests/test_router.py
-pytest mcp_server/memory/tests/test_consolidation.py
-```
-
-Run context evaluation:
-```bash
-python -m context_eval.run_eval
-```
-Outputs: `context_eval/results/comparison.csv` and per-strategy result files.
-
----
-
-## Troubleshooting
-
-| Symptom | Likely cause / fix |
+| Tool | Purpose |
 |---|---|
-| `"Missing DB"` errors | Ensure the SQLite DB in `db/` exists, or run `db/init_db.py`. |
-| `"Router not writing"` confusion | This is intentional — routing is restricted. Only the consolidator promotes to semantic memory. |
-| Retrieval performance oddities | If `hnswlib` isn't available, the `VectorStore` falls back to a NumPy exact-search fallback. Check your environment for an `hnswlib` install. |
+| `database_health` | Confirms the DB connection is live and returns row counts per table. |
+| `get_client` | Looks up a client by `party_id`. |
+| `get_case` | Looks up full case detail, joined with client name and case type. |
+| `get_lawyer` | Looks up a lawyer's profile and caseload. |
+| `get_conflict_checks` | Returns conflict-check results for a case. |
+| `accept_case` | Accepts a case; unlocks `assign_case_to_lawyer`. |
+| `reject_case` | Rejects a case with a recorded reason. |
+| `assign_case_to_lawyer` | Assigns an accepted case to a lawyer, enforcing status and caseload limits. |
 
----
+Several tools (`accept_case`, `reject_case`, `assign_case_to_lawyer`) use an elicitation pattern via `require_fields(ctx, ...)`: if a required argument is missing, the tool prompts the calling agent/UI for it through `ctx.elicit(...)` instead of erroring out.
 
-## Important Files (Quick Links)
+## Conflict Clearance Workflow
+
+The core case-review process is a LangGraph graph (`state_graph/conflict_clearance/graph.py`):
+
+```
+intake → decompose_conflict_check → search → evaluate → retrieve_policy → draft_memo → partner_signoff → cleared / rejected
+```
+
+- **Human-in-the-loop sign-off**: when `evaluate` produces a risk score above threshold, `partner_signoff` raises a LangGraph `interrupt()`, pausing the run until a partner records an `approve`/`reject` decision.
+- **Crash safety**: every step is checkpointed to SQLite via a custom `DBCheckpointSaver`. If the process dies mid-run, restarting and resuming with the same `thread_id` continues exactly where it left off — no re-run of completed steps.
+- **External service failures**: the `search` node calls an external conflict-search service. A timeout or malformed response is *not* treated as a HITL decision — it's caught, logged as an open row in the `tickets` table (with the last-good checkpoint ID attached), and the run halts. Resolving the ticket via `resume_from_ticket()` resumes the graph from that checkpoint, re-entering `search` rather than restarting from `intake`.
+
+## Configuration & Environment
+
+Common environment variables used by the project (no secrets in source):
+
+- `DATABASE_URL` — path or connection string for the DB (e.g. `sqlite:///./db/lawfirm.db`).
+- `ENV` — runtime environment (`development`, `testing`, `production`).
+- `LOG_LEVEL` — `DEBUG`, `INFO`, `WARN`, `ERROR`.
+- `NEXT_PUBLIC_API_URL` — URL the demo UI uses for API calls when running locally.
+
+If additional environment variables are required by a specific integration, they're documented near the integration code (search for `os.environ` usages).
+
+## Tests & Benchmarks
+
+- Full suite: `pytest`
+- Checkpointer + Conflict Clearance graph: `pytest tests/test_checkpointer.py tests/test_conflict_clearance.py -v`
+- MCP elicitation flow (accept/reject/assign, interactive): `python tests/mcp_server_elicitation_test.py`
+- MCP tool registration smoke test: `python smoke_test.py`
+- Memory routing tests: `pytest mcp_server/memory/tests/test_router.py`
+- Consolidation tests: `pytest mcp_server/memory/tests/test_consolidation.py`
+- Context evaluation: `python -m context_eval.run_eval` → results in `context_eval/results/`
+
+## Troubleshooting & Common Pitfalls
+
+- **Missing DB**: run `python db/init_db.py` and inspect `db/schema.sql`.
+- **Router appears not to write**: this is by design — router decisions are logged, and consolidation is responsible for promotions.
+- **Retrieval problems when `hnswlib` is missing**: `VectorStore` falls back to a NumPy-based exact search. Install `hnswlib` if you need large-vector performance.
+- **Smoke test reports 0/N tools registered**: check `mcp_server/tools.py` for a stray `mcp = FastMCP(...)` re-assignment after the `from .mcp_instance import mcp` import — this silently creates a second, orphaned MCP instance that decorators register against instead of the shared one.
+- **A tool call fails with a signature error it shouldn't have** (e.g. unexpected keyword argument, or "multiple values for argument"): search for a duplicate `def` of that tool name elsewhere in `tools.py`. Python silently keeps the last definition in the file, so an old placeholder further down can shadow — and un-register — the real, decorated implementation above it.
+
+## Important Files
 
 - [`mcp_server/server.py`](mcp_server/server.py)
 - [`mcp_server/tools.py`](mcp_server/tools.py)
+- [`mcp_server/mcp_instance.py`](mcp_server/mcp_instance.py)
 - [`mcp_server/memory/short_term.py`](mcp_server/memory/short_term.py)
 - [`mcp_server/memory/router.py`](mcp_server/memory/router.py)
 - [`mcp_server/memory/consolidation.py`](mcp_server/memory/consolidation.py)
+- [`state_graph/conflict_clearance/graph.py`](state_graph/conflict_clearance/graph.py)
+- [`state_graph/checkpointer.py`](state_graph/checkpointer.py)
+- [`state_graph/tickets.py`](state_graph/tickets.py)
 - [`context_eval/run_eval.py`](context_eval/run_eval.py)
 - [`project_root/rag`](project_root/rag)
 - [`db/schema.sql`](db/schema.sql)
 - [`lawfirm-ui/README.md`](lawfirm-ui/README.md)
 
----
-
 ## Contributing
 
-1. Describe the change in a concise PR and include unit tests for new behavior.
-2. Run `pytest` locally, and re-run the context evaluation if your change affects context strategies or retrieval.
-3. Preserve auditability when changing memory or routing behavior.
+- Keep changes small and focused. Add tests, and update the context evaluation if behavior changes affect context strategies or retrieval.
+- Preserve audit logs when changing routing or consolidation behavior.
+- Before adding a new tool or graph node, check for existing definitions of the same name — see [Common Pitfalls](#troubleshooting--common-pitfalls).
+
+## License & Contact
+
+This repository uses the MIT license (see `LICENSE`). For questions about the project or design decisions, open an issue or contact the maintainers listed in the repository metadata.
 
 ---
 
-## Closing Summary
-
-This repository demonstrates a safety-first integration pattern for applying LLMs to sensitive workflows: a small, audited tool interface (the MCP) plus an explicit memory/retrieval pipeline and a context-evaluation harness that guides production configuration. **ZonePruning + the memory subsystem + appropriate RAG selection** are the practical controls that let the system remain accurate and efficient while keeping sensitive client data secure.
-
-> Need a different version? A more compact README for non-developer audiences, or a longer step-by-step developer guide with environment variables and example requests, can be produced — just specify the target audience and the sections to include.
+*This README targets developers running, modifying, and extending the MCP server. If a shorter, non-technical README for stakeholders, or a longer step-by-step guide with API call examples, would be more useful, say which audience and which sections to expand.*
